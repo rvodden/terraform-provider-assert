@@ -35,7 +35,7 @@ jobs:
             ./cc-test-reporter before-build
             gotestsum --junitfile reports/junit/results.xml -- -coverprofile=c.out.tmp ./...
             EXIT_CODE=${?}
-            cat c.out.tmp | sed 's|terraform-provider-assert||' > c.out
+            cat c.out.tmp | sed 's|terraform-provider-assert/||' > c.out
             rm c.out.tmp && cat c.out
             ./cc-test-reporter after-build --exit-code ${EXIT_CODE}
       - store_test_results:
