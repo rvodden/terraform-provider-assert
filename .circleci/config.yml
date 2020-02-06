@@ -1,0 +1,74 @@
+---
+version: 2.1
+workflows:
+  version: 2
+  build-deploy:
+    jobs:
+      - build
+      - deploy:
+          requires:
+            - build
+          filters:
+            branches:
+              only:
+                - master
+jobs:
+  build:
+    docker:
+      - image: circleci/golang:1.13
+    steps:
+      - checkout
+      - run:
+          name: Setup Code Climate test-reporter
+          command: |
+            # download test reporter as a static binary
+            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+            chmod +x ./cc-test-reporter
+      - run:
+          name: Build
+          command: |
+            go build -v
+      - run:
+          name: Test
+          command: |
+            mkdir -p reports/junit
+            ./cc-test-reporter before-build
+            gotestsum --junitfile reports/junit/results.xml -- -coverprofile=c.out.tmp ./...
+            EXIT_CODE=${?}
+            cat c.out.tmp | sed 's|terraform-provider-assert||' > c.out
+            rm c.out.tmp && cat c.out
+            ./cc-test-reporter after-build --exit-code ${EXIT_CODE}
+      - store_test_results:
+          path: reports/junit
+
+  deploy:
+    docker:
+      - image: circleci/golang:1.13
+    steps:
+      - checkout
+      - run:
+          name: Download Utilities
+          command: |
+            go get github.com/mitchellh/gox
+            go get github.com/tcnksm/ghr
+            go get github.com/stevenmatthewt/semantics
+      - run:
+          name: Set Version
+          command: |
+            semantics --output-tag --dry-run > ./tag
+      - run:
+          name: cross compile
+          command: |
+            gox -arch="amd64" -os="darwin" -output="dist/terraform-provider-assert-{{.OS}}_{{.Arch}}"  -ldflags="-X main.BuildVersion=$(cat tag) -X main.BuildTime=\'_$(date -I'seconds')\'"
+      - store_artifacts:
+          path: dist/
+      - add_ssh_keys
+      - run:
+          name: Create Release
+          command: |
+            TAG=$(cat tag)
+            if [ "$tag" ]; then
+              ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} --replace ${TAG} dist/
+            else
+              echo "The commit message(s) did not indicate a major/minor/patch version."
+            fi
